@@ -82,6 +82,38 @@ async def ai_reply(chat_id: int, user_name: str, text: str) -> str:
     return answer
 
 
+# ---------- /start ----------
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if is_admin(update.effective_user.id):
+        text = (
+            "Hey admin 👋 Bot ready hai!\n\n"
+            "/away : main turant reply karunga\n"
+            "/back : main chup ho jaunga"
+        )
+    else:
+        text = (
+            "Hey! 👋 Main is group ka assistant bot hu.\n"
+            "Admin available na ho to main help kar deta hu 😄"
+        )
+    await update.message.reply_text(text)
+
+
+async def on_startup(app: Application):
+    # Bot start/restart hone pe admins ko message bhejo
+    for admin_id in ADMIN_IDS:
+        try:
+            await app.bot.send_message(
+                chat_id=admin_id,
+                text=(
+                    "✅ Bot chalu ho gaya!\n"
+                    "Restart ke baad away mode reset ho jata hai, "
+                    "to zarurat ho to group me /away bhej dena."
+                ),
+            )
+        except Exception:
+            log.warning("Admin %s ko startup msg nahi gaya (pehle bot ko DM me /start karo)", admin_id)
+
+
 # ---------- Commands (sirf admin) ----------
 async def cmd_away(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
@@ -187,7 +219,8 @@ async def keepalive(context: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).post_init(on_startup).build()
+    app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("away", cmd_away))
     app.add_handler(CommandHandler("back", cmd_back))
     app.add_handler(
