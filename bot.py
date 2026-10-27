@@ -68,14 +68,16 @@ async def ai_reply(chat_id: int, user_name: str, text: str) -> str:
     try:
         resp = await client.chat.completions.create(
             model=MODEL,
-            max_tokens=300,
+            max_tokens=1500,
             messages=[{"role": "system", "content": SYSTEM_PROMPT}] + list(h),
         )
         answer = (resp.choices[0].message.content or "").strip()
         if not answer:
             raise ValueError("empty reply")
-    except Exception:
-        log.exception("AI call fail hui")
+    except Exception as e:
+        log.exception("AI call fail hui: %r", e)
+        if h and h[-1]["role"] == "user":
+            h.pop()  # fail hui to history me atka hua msg hata do
         return "Yaar abhi thoda issue aa gaya 😅 Admin aate hi tumhara msg dekh lega!"
 
     h.append({"role": "assistant", "content": answer})
@@ -159,12 +161,22 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     chat_id = update.effective_chat.id
 
-    # Admin ne kuch bola = admin online hai, pending replies cancel
+    is_private = update.effective_chat.type == "private"
+    name = user.first_name or "User"
+
+    # Private chat: turant reply (admin ke liye tab, jab /away ON ho = test mode)
+    if is_private:
+        if is_admin(user.id) and not away_mode[chat_id]:
+            return
+        await context.bot.send_chat_action(chat_id, "typing")
+        answer = await ai_reply(chat_id, name, msg.text)
+        await msg.reply_text(answer)
+        return
+
+    # Group: admin ne kuch bola = admin online hai, pending replies cancel
     if is_admin(user.id):
         cancel_pending(context, chat_id)
         return
-
-    name = user.first_name or "User"
 
     if away_mode[chat_id]:
         # Admin ne /away kiya hai, turant reply
@@ -225,7 +237,7 @@ def main():
     app.add_handler(CommandHandler("back", cmd_back))
     app.add_handler(
         MessageHandler(
-            filters.TEXT & ~filters.COMMAND & (filters.ChatType.GROUPS),
+            filters.TEXT & ~filters.COMMAND & (filters.ChatType.GROUPS | filters.ChatType.PRIVATE),
             on_message,
         )
     )
