@@ -1,7 +1,10 @@
 import os
 import logging
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from collections import defaultdict, deque
 
+import httpx
 from openai import AsyncOpenAI
 from telegram import Update
 from telegram.ext import (
@@ -151,6 +154,38 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+# ---------- Render free plan: dummy web server + self-ping ----------
+class Ping(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"ok")
+
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
+
+    def log_message(self, *args):
+        pass
+
+
+def run_web():
+    port = int(os.getenv("PORT", "10000"))
+    HTTPServer(("0.0.0.0", port), Ping).serve_forever()
+
+
+async def keepalive(context: ContextTypes.DEFAULT_TYPE):
+    # Render free service 15 min idle pe sleep hoti hai, isliye khud ko ping karo
+    url = os.getenv("RENDER_EXTERNAL_URL")
+    if not url:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=10) as c:
+            await c.get(url)
+    except Exception:
+        log.warning("keepalive ping fail hui")
+
+
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("away", cmd_away))
@@ -161,6 +196,8 @@ def main():
             on_message,
         )
     )
+    threading.Thread(target=run_web, daemon=True).start()
+    app.job_queue.run_repeating(keepalive, interval=600, first=60)
     log.info("Bot chalu ho gaya...")
     app.run_polling()
 
